@@ -1,6 +1,11 @@
 package com.example.logsearch
 
 import android.Manifest
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
@@ -49,13 +54,40 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btnLoad).setOnClickListener { loadLogs() }
         findViewById<Button>(R.id.btnSample).setOnClickListener { addSampleLogs() }
         findViewById<Button>(R.id.btnShare).setOnClickListener { shareLogs() }
+        findViewById<Button>(R.id.btnCopy).setOnClickListener { copyLogs() }
         btnApp.setOnClickListener { pickApp() }
+
+        // Close the keyboard on "search" and when scrolling, so text can be selected
+        etSearch.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == EditorInfo.IME_ACTION_SEARCH) { hideKeyboard(); true } else false
+        }
+        recycler.addOnScrollListener(object : RecyclerView.OnScrollListener() {
+            override fun onScrollStateChanged(rv: RecyclerView, newState: Int) {
+                if (newState == RecyclerView.SCROLL_STATE_DRAGGING) hideKeyboard()
+            }
+        })
 
         etSearch.addTextChangedListener(object : TextWatcher {
             override fun afterTextChanged(s: Editable?) = applyFilter()
             override fun beforeTextChanged(s: CharSequence?, st: Int, c: Int, a: Int) {}
             override fun onTextChanged(s: CharSequence?, st: Int, b: Int, c: Int) {}
         })
+    }
+
+    private fun hideKeyboard() {
+        val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        imm.hideSoftInputFromWindow(etSearch.windowToken, 0)
+        etSearch.clearFocus()
+    }
+
+    private fun copyLogs() {
+        if (shownLines.isEmpty()) {
+            Toast.makeText(this, "Nothing to copy", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        cm.setPrimaryClip(ClipData.newPlainText("logs", shownLines.joinToString("\n")))
+        Toast.makeText(this, "Copied ${shownLines.size} lines", Toast.LENGTH_SHORT).show()
     }
 
     private fun hasReadLogs() =

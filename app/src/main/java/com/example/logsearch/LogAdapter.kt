@@ -56,6 +56,8 @@ class LogAdapter : RecyclerView.Adapter<LogAdapter.VH>() {
         }
         holder.tv.text = span
         holder.tv.setTextColor(levelColor(line))
+        // Selection only works reliably if this is (re)applied after the text is set
+        holder.tv.setTextIsSelectable(true)
     }
 
     // logcat "-v time" format: "MM-DD HH:MM:SS.mmm L/Tag(pid): msg" -> level char at index 19
