@@ -32,6 +32,13 @@
             android:text="Share" />
     </LinearLayout>
 
+    <Button
+        android:id="@+id/btnApp"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="App: All apps (tap to change)"
+        android:textAllCaps="false" />
+
     <EditText
         android:id="@+id/etSearch"
         android:layout_width="match_parent"

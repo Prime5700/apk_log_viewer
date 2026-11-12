@@ -1,26 +1,38 @@
 package com.example.logsearch
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
 import android.util.Log
+import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.EditText
+import android.widget.LinearLayout
+import android.widget.ListView
 import android.widget.TextView
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 
 class MainActivity : AppCompatActivity() {
 
+    private data class AppItem(val label: String, val pkg: String, val uid: Int) {
+        override fun toString() = if (pkg.isEmpty()) label else "$label\n$pkg"
+    }
+
     private val adapter = LogAdapter()
     private var allLines: List<String> = emptyList()
     private var shownLines: List<String> = emptyList()
+    private var selected: AppItem? = null   // null = all apps
 
     private lateinit var etSearch: EditText
     private lateinit var tvCount: TextView
+    private lateinit var btnApp: Button
     private lateinit var recycler: RecyclerView
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -29,6 +41,7 @@ class MainActivity : AppCompatActivity() {
 
         etSearch = findViewById(R.id.etSearch)
         tvCount = findViewById(R.id.tvCount)
+        btnApp = findViewById(R.id.btnApp)
         recycler = findViewById(R.id.recycler)
         recycler.layoutManager = LinearLayoutManager(this)
         recycler.adapter = adapter
@@ -36,6 +49,7 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btnLoad).setOnClickListener { loadLogs() }
         findViewById<Button>(R.id.btnSample).setOnClickListener { addSampleLogs() }
         findViewById<Button>(R.id.btnShare).setOnClickListener { shareLogs() }
+        btnApp.setOnClickListener { pickApp() }
 
         etSearch.addTextChangedListener(object : TextWatcher {
             override fun afterTextChanged(s: Editable?) = applyFilter()
@@ -44,12 +58,62 @@ class MainActivity : AppCompatActivity() {
         })
     }
 
-    /** Dumps the current logcat buffer. Without READ_LOGS this contains only this app's logs. */
+    private fun hasReadLogs() =
+        checkSelfPermission(Manifest.permission.READ_LOGS) == PackageManager.PERMISSION_GRANTED
+
+    /** Dialog with a search box + list of launchable installed apps. */
+    private fun pickApp() {
+        val pm = packageManager
+        val apps = pm.getInstalledApplications(0)
+            .filter { pm.getLaunchIntentForPackage(it.packageName) != null }
+            .map { AppItem(pm.getApplicationLabel(it).toString(), it.packageName, it.uid) }
+            .sortedBy { it.label.lowercase() }
+        val all = listOf(AppItem("All apps", "", -1)) + apps
+        val shown = all.toMutableList()
+
+        val listAdapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, shown)
+        val search = EditText(this).apply { hint = "Search apps…"; maxLines = 1; inputType = 1 }
+        val list = ListView(this).apply { adapter = listAdapter }
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(32, 16, 32, 0)
+            addView(search)
+            addView(list)
+        }
+        val dialog = AlertDialog.Builder(this).setTitle("Select app").setView(root).create()
+
+        search.addTextChangedListener(object : TextWatcher {
+            override fun afterTextChanged(s: Editable?) {
+                val q = s.toString().trim()
+                shown.clear()
+                shown.addAll(all.filter {
+                    it.label.contains(q, true) || it.pkg.contains(q, true)
+                })
+                listAdapter.notifyDataSetChanged()
+            }
+            override fun beforeTextChanged(s: CharSequence?, st: Int, c: Int, a: Int) {}
+            override fun onTextChanged(s: CharSequence?, st: Int, b: Int, c: Int) {}
+        })
+        list.setOnItemClickListener { _, _, pos, _ ->
+            val item = shown[pos]
+            selected = if (item.pkg.isEmpty()) null else item
+            btnApp.text = "App: ${item.label} (tap to change)"
+            dialog.dismiss()
+            loadLogs()
+        }
+        dialog.show()
+    }
+
+    /** Dumps the logcat buffer, optionally limited to the selected app's UID. */
     private fun loadLogs() {
         tvCount.text = "Loading…"
+        val sel = selected
+        val ownLogsOnly = !hasReadLogs()
         Thread {
+            val cmd = mutableListOf("logcat", "-d", "-v", "time")
+            if (sel != null) { cmd += "--uid"; cmd += sel.uid.toString() }
             val result = try {
-                val proc = Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-v", "time"))
+                val proc = Runtime.getRuntime().exec(cmd.toTypedArray())
                 val lines = proc.inputStream.bufferedReader().readLines()
                 proc.destroy()
                 lines
@@ -59,6 +123,13 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread {
                 allLines = result
                 applyFilter()
+                if (ownLogsOnly && sel != null && sel.pkg != packageName) {
+                    Toast.makeText(
+                        this,
+                        "READ_LOGS not granted – other apps' logs are hidden. See adb command.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
                 if (shownLines.isNotEmpty()) recycler.scrollToPosition(shownLines.size - 1)
             }
         }.start()
@@ -68,8 +139,9 @@ class MainActivity : AppCompatActivity() {
         val q = etSearch.text.toString().trim()
         shownLines = if (q.isEmpty()) allLines else allLines.filter { it.contains(q, ignoreCase = true) }
         adapter.submit(shownLines, q)
-        tvCount.text = if (q.isEmpty()) "${allLines.size} lines"
-        else "${shownLines.size} of ${allLines.size} lines match “$q”"
+        val src = selected?.label ?: if (hasReadLogs()) "all apps" else "this app only"
+        tvCount.text = if (q.isEmpty()) "$src: ${allLines.size} lines"
+        else "$src: ${shownLines.size} of ${allLines.size} lines match “$q”"
     }
 
     private fun addSampleLogs() {
